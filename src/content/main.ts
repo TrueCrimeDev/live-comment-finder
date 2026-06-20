@@ -1,13 +1,15 @@
-// Boot guard prevents double-init when statically matched AND injected.
+import { boot } from './bootstrap';
+
 declare global {
   interface Window {
     __lcfBooted?: boolean;
   }
 }
 
+// Boot guard prevents double-init when statically matched AND injected on demand.
 if (!window.__lcfBooted) {
   window.__lcfBooted = true;
-  // capture bootstrap wired in Task 15
+  void boot();
 }
 
 export {};
