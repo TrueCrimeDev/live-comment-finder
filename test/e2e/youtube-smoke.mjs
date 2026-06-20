@@ -167,6 +167,58 @@ try {
   check('locating an unmounted comment reports found:false', removedResult?.found === false);
   check('unmounted comment text still retained in snapshot', removed.text.includes('привет'));
 
+  // 8) Regression: a feed that hydrates AFTER the content script boots must still be
+  //    captured (YouTube renders its chat #items asynchronously after document_idle).
+  const page2 = await browser.newPage();
+  await page2.setRequestInterception(true);
+  page2.on('request', (req) => {
+    if (req.resourceType() === 'document')
+      req.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body><div id="shell">loading…</div></body></html>' });
+    else req.continue();
+  });
+  await page2.goto('https://www.youtube.com/live_chat?late=1', { waitUntil: 'domcontentloaded' });
+  const tab2 = await ext.evaluate(async () => {
+    const tabs = await chrome.tabs.query({ url: '*://*.youtube.com/*' });
+    return tabs.find((t) => t.url.includes('late=1'))?.id;
+  });
+  await ext.evaluate(async (id) => {
+    const file = chrome.runtime.getManifest().content_scripts[0].js[0];
+    try {
+      await chrome.scripting.executeScript({ target: { tabId: id }, files: [file] });
+    } catch {
+      /* already present */
+    }
+  }, tab2);
+  await sleep(1000); // content boots while no feed exists → feed-not-found
+  await page2.evaluate(() => {
+    const list = document.createElement('yt-live-chat-item-list-renderer');
+    const items = document.createElement('div');
+    items.id = 'items';
+    const mk = (who, txt) => {
+      const r = document.createElement('yt-live-chat-text-message-renderer');
+      const a = document.createElement('span');
+      a.id = 'author-name';
+      a.textContent = who;
+      const m = document.createElement('span');
+      m.id = 'message';
+      m.textContent = txt;
+      r.append(a, m);
+      items.appendChild(r);
+    };
+    mk('Eve', 'late hydrated');
+    mk('Fay', 'second late');
+    list.appendChild(items);
+    document.body.appendChild(list); // feed appears AFTER boot
+  });
+  await sleep(1200); // scheduleResolve (400ms) + batch flush (250ms) + margin
+  await ext.evaluate(() => {
+    window.__snap = [];
+  });
+  await ext.evaluate((id) => chrome.tabs.sendMessage(id, { type: 'REQUEST_SNAPSHOT' }).catch(() => {}), tab2);
+  await sleep(500);
+  const lateSnap = await ext.evaluate(() => window.__snap);
+  check('feed that hydrates after boot is captured (regression)', lateSnap.length >= 2);
+
   console.log(`\n${failures === 0 ? 'E2E PASS' : 'E2E FAIL'} — ${snap.length} comments captured, ${failures} failure(s)`);
 } catch (err) {
   console.error('E2E ERROR:', err?.message ?? err);

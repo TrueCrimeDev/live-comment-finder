@@ -29,17 +29,22 @@ export async function boot(): Promise<void> {
   let adapter: LiveCommentAdapter | null = null;
   let controller: CaptureController | null = null;
   let observer: MutationObserver | null = null;
+  let currentFeed: Element | null = null;
   let state: CaptureState = 'unsupported';
+  let lastAnnounced: CaptureState | null = null;
+  let resolveTimer: number | null = null;
   let teardownPicker: (() => void) | null = null;
 
   const send = (msg: Message): void => {
     void chrome.runtime.sendMessage(msg).catch(() => {});
   };
 
-  function announceStatus(): void {
-    // Only announce when this frame owns a feed — avoids non-feed frames clobbering state.
-    if (!controller) return;
-    send({ type: 'CAPTURE_STATUS', state, source: adapter?.id, capturedCount: controller.snapshot().length });
+  function announce(force = false): void {
+    // Stay silent for 'unsupported' so a non-feed frame never clobbers a feed frame's status.
+    if (state === 'unsupported') return;
+    if (!force && state === lastAnnounced) return;
+    lastAnnounced = state;
+    send({ type: 'CAPTURE_STATUS', state, source: adapter?.id, capturedCount: controller?.snapshot().length ?? 0 });
   }
 
   function startObserving(feed: Element, a: LiveCommentAdapter): void {
@@ -65,31 +70,51 @@ export async function boot(): Promise<void> {
       if (timer === null) timer = window.setTimeout(flush, BATCH_MS);
     });
     observer.observe(feed, { childList: true, subtree: true });
+    currentFeed = feed;
 
     state = controller.paused ? 'paused' : 'connected';
-    announceStatus();
+    announce(true);
   }
 
   function stopObserving(): void {
     observer?.disconnect();
     observer = null;
+    currentFeed = null;
+  }
+
+  function reset(): void {
+    stopObserving();
+    controller = null;
+    state = 'unsupported';
+    lastAnnounced = null;
   }
 
   async function tryStart(): Promise<void> {
+    if (controller) return; // already capturing
     adapter = await resolveAdapter(adapters, ctx);
     if (!adapter) {
       state = 'unsupported';
-      return; // stay silent so we never clobber a feed frame's status
+      return; // site not recognized; stay silent so we never clobber a feed frame
     }
     const feed = await adapter.locateFeed(ctx);
     if (!feed) {
+      // Site recognized but the feed isn't mounted yet. Announce once; the
+      // lifecycle observer keeps re-checking until it appears (YouTube and other
+      // SPAs hydrate their chat feed asynchronously after document_idle).
       state = 'feed-not-found';
-      // Site is recognized but the feed isn't mounted yet; tell the panel so it
-      // shows "feed not found" rather than "unsupported".
-      send({ type: 'CAPTURE_STATUS', state, source: adapter.id });
+      announce();
       return;
     }
     startObserving(feed, adapter);
+  }
+
+  /** Throttled re-resolve while we have no feed yet (the feed may appear later). */
+  function scheduleResolve(): void {
+    if (resolveTimer !== null || controller) return;
+    resolveTimer = window.setTimeout(() => {
+      resolveTimer = null;
+      void tryStart();
+    }, 400);
   }
 
   async function onGenericPicked(container: Element): Promise<void> {
@@ -106,18 +131,25 @@ export async function boot(): Promise<void> {
     send({ type: 'SNAPSHOT', comments: controller?.snapshot() ?? [], state });
   }
 
-  // --- SPA navigation: re-resolve the feed when the URL changes ---
+  // --- Lifecycle observer: handles SPA navigation, late-appearing feeds, and
+  //     feeds that get torn down (chat reloads). The feed often hydrates after
+  //     document_idle, so a one-shot locateFeed at boot is not enough. ---
   let lastUrl = location.href;
-  const navObserver = new MutationObserver(() => {
+  const lifecycleObserver = new MutationObserver(() => {
     if (location.href !== lastUrl) {
       lastUrl = location.href;
-      stopObserving();
-      controller = null;
-      state = 'unsupported';
+      reset();
       void tryStart();
+      scheduleResolve();
+      return;
     }
+    if (controller && currentFeed && !currentFeed.isConnected) {
+      // The observed feed was detached (e.g. chat reloaded) — re-resolve.
+      reset();
+    }
+    if (!controller) scheduleResolve();
   });
-  navObserver.observe(document, { childList: true, subtree: true });
+  lifecycleObserver.observe(document.documentElement, { childList: true, subtree: true });
 
   chrome.runtime.onMessage.addListener((raw) => {
     const msg = validateMessage(raw);
@@ -130,14 +162,14 @@ export async function boot(): Promise<void> {
         if (controller) {
           controller.pause();
           state = 'paused';
-          announceStatus();
+          announce(true);
         }
         return undefined;
       case 'RESUME_CAPTURE':
         if (controller) {
           controller.resume();
           state = 'connected';
-          announceStatus();
+          announce(true);
         }
         return undefined;
       case 'STOP_CAPTURE':
@@ -148,12 +180,12 @@ export async function boot(): Promise<void> {
         return undefined;
       case 'CLEAR_HISTORY':
         controller?.clear();
-        announceStatus();
+        announce(true);
         return undefined;
       case 'SET_CAPACITY':
         settings = { ...settings, maxComments: msg.capacity };
         controller?.setCapacity(msg.capacity);
-        announceStatus();
+        announce(true);
         return undefined;
       case 'LOCATE_COMMENT': {
         const owned = controller?.locateId(msg.id);
@@ -183,4 +215,7 @@ export async function boot(): Promise<void> {
     ctx.genericSelectors = savedSelectors;
   }
   await tryStart();
+  // If the feed isn't up yet, keep polling (the lifecycle observer also re-checks
+  // on DOM mutations, but this covers feeds that appear without further mutations).
+  if (!controller) scheduleResolve();
 }
