@@ -12,6 +12,7 @@ export type Message =
   | { type: 'LOCATE_COMMENT'; id: string }
   | { type: 'LOCATE_RESULT'; id: string; found: boolean }
   | { type: 'CLEAR_HISTORY' }
+  | { type: 'SET_CAPACITY'; capacity: number }
   | { type: 'BEGIN_ELEMENT_SELECTION' }
   | { type: 'SELECTION_COMPLETED'; cancelled: boolean; selectors?: GenericSelectors; host?: string }
   | { type: 'ACTIVE_TAB_CHANGED'; tabId: number }
@@ -31,6 +32,7 @@ const TYPES = new Set<MessageType>([
   'LOCATE_COMMENT',
   'LOCATE_RESULT',
   'CLEAR_HISTORY',
+  'SET_CAPACITY',
   'BEGIN_ELEMENT_SELECTION',
   'SELECTION_COMPLETED',
   'ACTIVE_TAB_CHANGED',
@@ -59,6 +61,8 @@ export function validateMessage(value: unknown): Message | null {
       return typeof value.cancelled === 'boolean' ? (value as Message) : null;
     case 'ACTIVE_TAB_CHANGED':
       return typeof value.tabId === 'number' ? (value as Message) : null;
+    case 'SET_CAPACITY':
+      return typeof value.capacity === 'number' ? (value as Message) : null;
     case 'ERROR':
       return typeof value.message === 'string' ? (value as Message) : null;
     default:

@@ -79,11 +79,14 @@ export async function boot(): Promise<void> {
     adapter = await resolveAdapter(adapters, ctx);
     if (!adapter) {
       state = 'unsupported';
-      return;
+      return; // stay silent so we never clobber a feed frame's status
     }
     const feed = await adapter.locateFeed(ctx);
     if (!feed) {
       state = 'feed-not-found';
+      // Site is recognized but the feed isn't mounted yet; tell the panel so it
+      // shows "feed not found" rather than "unsupported".
+      send({ type: 'CAPTURE_STATUS', state, source: adapter.id });
       return;
     }
     startObserving(feed, adapter);
@@ -145,6 +148,11 @@ export async function boot(): Promise<void> {
         return undefined;
       case 'CLEAR_HISTORY':
         controller?.clear();
+        announceStatus();
+        return undefined;
+      case 'SET_CAPACITY':
+        settings = { ...settings, maxComments: msg.capacity };
+        controller?.setCapacity(msg.capacity);
         announceStatus();
         return undefined;
       case 'LOCATE_COMMENT': {

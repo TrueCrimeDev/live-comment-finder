@@ -4,7 +4,7 @@ import { collapseWhitespace } from '../../shared/normalize';
 
 // --- Selectors (repair here if YouTube changes its DOM) ---
 const ITEM = 'yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer';
-const FEED = '#items.yt-live-chat-item-list-renderer, yt-live-chat-item-list-renderer #items, #items';
+const FEED = '#items.yt-live-chat-item-list-renderer, yt-live-chat-item-list-renderer #items';
 const AUTHOR = '#author-name';
 const MESSAGE = '#message';
 const TIMESTAMP = '#timestamp';

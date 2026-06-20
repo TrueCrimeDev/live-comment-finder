@@ -4,9 +4,58 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Live Comment Finder</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="app">Loading…</div>
+    <header class="bar">
+      <span class="status" id="status" role="status" aria-live="polite">
+        <span class="dot" data-state="unsupported"></span>
+        <span id="status-text">Unsupported page</span>
+      </span>
+      <div class="bar-actions">
+        <button id="pause" type="button">Pause</button>
+        <button id="clear" type="button">Clear</button>
+      </div>
+    </header>
+
+    <div class="search">
+      <label class="sr-only" for="q">Search comments</label>
+      <input id="q" type="search" placeholder="Search comments…" autocomplete="off" />
+
+      <label class="sr-only" for="author">Filter by author</label>
+      <input id="author" type="search" placeholder="Author…" autocomplete="off" />
+
+      <p id="regex-error" class="error" role="alert" hidden></p>
+
+      <div class="options" role="group" aria-label="Search options">
+        <label><input type="radio" name="mode" value="substring" checked /> Substring</label>
+        <label><input type="radio" name="mode" value="case-sensitive" /> Case</label>
+        <label><input type="radio" name="mode" value="whole-word" /> Word</label>
+        <label><input type="radio" name="mode" value="exact-phrase" /> Phrase</label>
+        <label><input type="radio" name="mode" value="regex" /> Regex</label>
+        <label class="sr-only" for="sort">Sort order</label>
+        <select id="sort" aria-label="Sort order">
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+        </select>
+        <label>Max <input id="max" type="number" min="1000" max="50000" step="1000" value="10000" style="width: 72px" /></label>
+        <button id="clear-filters" type="button">Clear filters</button>
+      </div>
+
+      <div class="counts" aria-live="polite">
+        <span id="result-count">0 results</span> · <span id="captured-count">0 captured</span>
+      </div>
+
+      <div class="exports">
+        <button id="export-json" type="button">Export JSON</button>
+        <button id="export-csv" type="button">Export CSV</button>
+        <button id="select-feed" type="button">Select Comment Feed</button>
+      </div>
+    </div>
+
+    <main id="results" class="results-viewport" tabindex="0" aria-label="Results"></main>
+    <p id="empty" class="empty" hidden></p>
+
     <script type="module" src="./main.ts"></script>
   </body>
 </html>
